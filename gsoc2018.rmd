@@ -11,8 +11,10 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 rm(list = ls(all=T))
 ```
 
-## loading required packages
+Github repository: [https://github.com/XiaodanLyu/Gsoc2018-Test](https://github.com/XiaodanLyu/Gsoc2018-Test).
+
 ```{r}
+## loading required packages
 library(rgbif)
 library(tidyverse)
 library(rworldmap)
