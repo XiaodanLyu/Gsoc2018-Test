@@ -1,0 +1,131 @@
+---
+title: "gsoc2018 Test -- species range maps in R"
+author: "Xiaodan Lyu"
+output:
+  html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 8, fig.height = 6, fig.align = "center")
+rm(list = ls(all=T))
+```
+
+## loading required packages
+```{r}
+library(rgbif)
+library(tidyverse)
+library(rworldmap)
+library(sp)
+library(raster)
+library(leaflet)
+```
+
+## Easy part
+### download data
+```{r}
+key <- 4299800 ## Eyed brown butterfly
+## 1627 occurrences in total according to GBIF
+dget <- occ_data(taxonKey = key, limit = 1627)
+# dget$data %>% glimpse
+draw <- dget$data %>% mutate(lng = decimalLongitude, lat = decimalLatitude)
+```
+## cleaning data
+```{r}
+apply(draw %>% dplyr::select(lng, lat), 2, function(x) sum(is.na(x))) # 104 missing coordinates
+## remove missing coordinates, 1523 records remaining
+draw2 <- draw %>% filter(!is.na(lng), !is.na(lat))
+table(draw2$country) ## only in Canada and US
+## exlude misspecified locations, 1479 records remaining
+d <- draw2 %>% filter(!(lng == 0 & lat == 0))
+```
+
+### make a map
+```{r}
+## using function in package rgbif
+gbifmap(input = d, region = c("USA", "Canada"))
+## or ggplot from scratch
+extent <- d %>% dplyr::select(x = lng, y = lat) %>% raster::extent()
+base_layer <- ggplot(data = d, aes(x = lng, y = lat)) + 
+  geom_point(size = 2, color = "red") +
+  coord_equal() + ggthemes::theme_map()
+map.ggplot <- base_layer +
+  geom_path(data = map_data("world"), aes(x = long, y = lat, group = group)) +
+  scale_x_continuous(limits = c(extent@xmin, extent@xmax)) +
+  scale_y_continuous(limits = c(extent@ymin, extent@ymax))
+map.ggplot
+```
+
+
+## Medium part
+```{r}
+## find convex hull id
+hpts <- chull(d$lng, d$lat)
+## make convex hull layer
+chull_layer <- geom_polygon(aes(x = lng, y = lat), data = d[hpts,],
+                            fill = NA, color = "blue", size = 1.25)
+map.ggplot + chull_layer
+```
+
+## Hard part
+```{r}
+## convex hull polygon
+chull.poly <- Polygon(d[hpts, c("lng", "lat")]) %>% list %>% Polygons(ID=1) %>%
+  list %>% SpatialPolygons()
+proj4string(chull.poly) <- CRS("+init=epsg:4326")
+## world map from package rworldmap
+world_map <- getMap(resolution = "high") %>% subset(continent = "North America")
+## ensure coordinate reference systems are the same
+world_map <- sp::spTransform(world_map, proj4string(chull.poly))
+## intersect the convex hull polygon with world map polygons
+onland.poly <- intersect(world_map, chull.poly)
+plot(onland.poly)
+## eliminate the country boundaries by uniting the above polygons
+lps <- getSpPPolygonsLabptSlots(onland.poly)
+IDOneBin <- cut(lps[,1], range(lps[,1]), include.lowest = TRUE)
+onland <- maptools::unionSpatialPolygons(onland.poly, IDOneBin)
+plot(onland)
+## layer of the polygon on land
+onland_layer <- geom_polygon(aes(x = long, y = lat, group = piece), data = fortify(onland),
+                             fill = NA, color = "blue", size = 1.25)
+map.ggplot + onland_layer
+```
+
+## Interactive graphics: leaflet
+```{r}
+## with cluster options
+leaflet(data = d) %>% addTiles() %>%
+  addCircleMarkers(lng = ~lng, lat = ~lat, color = "red", radius = 2,
+                   clusterOptions = markerClusterOptions(),
+                   label = ~sprintf("lng = %.2f, lat = %.2f", lng, lat))
+## without cluster options
+map.leaflet <- leaflet(data = d) %>% addTiles() %>%
+  addCircleMarkers(lng = ~lng, lat = ~lat, color = "red", radius = 2,
+                   label = ~sprintf("lng = %.2f, lat = %.2f", lng, lat)) %>% 
+  addPolygons(group = "convex hull", data = chull.poly, fill = FALSE,
+              stroke = TRUE, color = "black", weight = 2) %>%
+  addPolygons(group = "on land", data = onland, fill = FALSE,
+              stroke = TRUE, color = "blue", weight = 2) %>%
+  addLayersControl(overlayGroups = c("convex hull", "on land"),
+                   options = layersControlOptions(collapsed = FALSE)) %>%
+  hideGroup("convex hull")
+map.leaflet %>%
+  addPolygons(group = "convex hull", data = chull.poly, fill = FALSE,
+              stroke = TRUE, color = "black", weight = 2) %>%
+  addPolygons(group = "on land", data = onland, fill = FALSE,
+              stroke = TRUE, color = "blue", weight = 2) %>%
+  addLayersControl(overlayGroups = c("convex hull", "on land"),
+                   options = layersControlOptions(collapsed = FALSE)) %>%
+  hideGroup("convex hull")
+```
+
+## Moreover
+```{r eval=FALSE}
+## Not run
+## misspecified locations
+pts <- draw2 %>% filter(lng == 0, lat == 0) %>% dplyr::select(locality)
+## results returned from ggmap geocodes give the potential coordinates of those records
+trypts <- sapply(pts, ggmap::geocode)
+data.frame(locality = wrongpts, lng = trypts[[1]], lat = trypts[[2]])
+## locations with no returning coordinates could be found out by carefully renaming the locations
+```
