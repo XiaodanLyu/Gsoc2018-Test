@@ -1,2 +1,7 @@
 rsconnect/documents/gsoc2018.rmd/rpubs.com/rpubs/Document.dcf
 rsconnect/documents/gsoc2018.rmd/rpubs.com/rpubs/Publish Document.dcf
+.Rproj.user
+*.pdf
+*.docx
+*.Rproj
+proposal.rmd
